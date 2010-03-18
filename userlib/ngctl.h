@@ -80,3 +80,4 @@ extern int	csock, dsock;
 extern void	MsgRead(void);
 extern void	DumpAscii(const u_char *buf, int len);
 
+

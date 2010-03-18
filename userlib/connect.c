@@ -43,7 +43,7 @@
 
 #include "ngctl.h"
 
-static int ConnectCmd(int ac, char **av);
+static int ConnectCmd(int ac, char **av); 
 
 const struct ngcmd connect_cmd = {
 	ConnectCmd,

@@ -1,12 +1,13 @@
 sbin_PROGRAMS=load
 
-load_OBJS=load.o mkpeer.o name.o msg.o connect.o
+load_OBJS=load.o mkpeer.o name.o msg.o connect.o 
 
 CC=gcc
 #CFLAGS=-O2 -pipe -std=c99 -Wall -lnetgraph
 
-CFLAGS=-O -g -pipe -std=c99 -Wall -lnetgraph
-CPPFLAGS=-I/usr/local/include
+CFLAGS=-O -g -pipe -std=c99 -Wall 
+CPPFLAGS=-I/usr/include
+LIBS=-L/usr/lib -lnetgraph
 
 PREFIX=$(HOME)/load
 
@@ -17,7 +18,7 @@ INSTALL_OPTS=-m 550
 all: $(sbin_PROGRAMS)
 
 load: $(load_OBJS)
-	$(CC) -o load $(load_OBJS)
+	$(CC) -o load $(load_OBJS) $(LIBS)
 
 c.o.:
 	$(CC) $(CFLAGS) -c $<
