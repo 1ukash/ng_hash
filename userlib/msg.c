@@ -48,7 +48,7 @@
 
 #include "ngctl.h"
 
-static int MsgCmd(int ac, char **av);
+int MsgCmd(int ac, char **av);
 
 const struct ngcmd msg_cmd = {
 	MsgCmd,
@@ -61,7 +61,7 @@ const struct ngcmd msg_cmd = {
 	{ "cmd" }
 };
 
-static int
+int
 MsgCmd(int ac, char **av)
 {
 	char *buf;

@@ -44,7 +44,7 @@
 
 #include "ngctl.h"
 
-static int NameCmd(int ac, char **av);
+int NameCmd(int ac, char **av);
 
 const struct ngcmd name_cmd = {
 	NameCmd,
@@ -54,7 +54,7 @@ const struct ngcmd name_cmd = {
 	{ NULL }
 };
 
-static int
+int
 NameCmd(int ac, char **av)
 {
 	struct ngm_name name;

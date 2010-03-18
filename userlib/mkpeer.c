@@ -40,10 +40,10 @@
 #include <err.h>
 #include <netgraph.h>
 #include <stdio.h>
-//#include <netgraph/ng_socket.h>
+#include <netgraph/ng_message.h>
 #include "ngctl.h"
 
-static int MkPeerCmd(int ac, char **av);
+int MkPeerCmd(int ac, char **av);
 
 const struct ngcmd mkpeer_cmd = {
 	MkPeerCmd,
@@ -57,11 +57,12 @@ const struct ngcmd mkpeer_cmd = {
 	{ NULL }
 };
 
-static int
+int
 MkPeerCmd(int ac, char **av)
 {
 	struct ngm_mkpeer mkp;
 	const char *path = ".";
+
 
 	/* Get arguments */
 	switch (ac) {

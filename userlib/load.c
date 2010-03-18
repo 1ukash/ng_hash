@@ -32,6 +32,13 @@ int main (int argc, char **argv)
 	int res = 0;
 	
 	char buf_mkp[10], buf_name[15],buf_msg[10];
+
+	/* Проверка числа переданных аргументов */
+	if (argc < 2)
+	{
+		printf ("%s:HASH no interface name specified\n", argv[0]);
+		exit(1);
+	}
 	
 	strcpy (buf_mkp,argv[1]);
 	strcat (buf_mkp,":");
@@ -51,61 +58,55 @@ int main (int argc, char **argv)
 	/* Задание имени узла по умолчанию */
 	snprintf(name, sizeof(name), "ngctl%d", getpid());
 	
-	/* Проверка числа переданных аргументов */
-	if (argc < 2)
-	{
-		printf ("%s:HASH no interface name specified", argv[0]);
-		exit(1);
-	}
 	
-	csock = socket (PF_NETGRAPH, SOCK_DGRAM, NG_CONTROL);
-	dsock = socket (PF_NETGRAPH, SOCK_DGRAM, NG_DATA);
+	/*csock = socket (PF_NETGRAPH, SOCK_DGRAM, NG_CONTROL);
+	dsock = socket (PF_NETGRAPH, SOCK_DGRAM, NG_DATA);*/
 	
 	/* Создание нового узла сокета */
 	if (NgMkSockNode(name, &csock, &dsock) < 0)
 	{
-		fprintf (stderr, "Error of creating node - %s", (char *)strerror(errno));
+		fprintf (stderr, "Error of creating node - %s\n", (char *)strerror(errno));
 		exit(1);
 	}
 	
 	/* Описание MkPeer*/
 	if (!(res = MkPeerCmd(args_count, args_mkp)))
 	{
-		printf("Create node successful");
+		printf("Create node successful\n");
 	}
 	else
 	{
-		printf("Error of creating node");
+		printf("Error of creating node!\n");
 	}
 	
 	args_count = 3;
 	/* Описание Name*/
 	if (!(res = NameCmd(args_count, args_name)))
 	{
-		printf("Name is changed");
+		printf("Name is change\n");
 	}
 	else
 	{
-		printf("Error of changing name");
+		printf("Error of changing name!\n");
 	}
 	
 	args_count = 5;
 	/* Описание Msg*/
 	if (!(res = MsgCmd(args_count, args_msg)))
 	{
-		printf("Message 'setpromisc' was sent");
+		printf("Message 'setpromisc' was sent\n");
 	}
 	else
 	{
-		printf("Error of sending message 'setpromisc'");
+		printf("Error of sending message 'setpromisc'\n");
 	}
 	if (!(res = MsgCmd(args_count, args_msg2)))
 	{
-		printf("Message 'setautosrc' was sent");
+		printf("Message 'setautosrc' was sent\n");
 	}
 	else
 	{
-		printf("Error of sending message 'setautosrc'");
+		printf("Error of sending message 'setautosrc'\n");
 	}
 	
 	if (argc > 2)
@@ -144,29 +145,29 @@ void interface (char **buf_con, char **msg, char **msg2, char *arg, char *ch)
 	/* Описание Connect*/
 	if (!(res = ConnectCmd(args_count, buf_con)))
 	{
-		printf("Connect is successful!");
+		printf("Connect is successful!\n");
 	}
 	else
 	{
-		printf("Error of connecting");
+		printf("Error of connecting\n");
 	}
 	
 	/* Описание Msg*/
 	if (!(res = MsgCmd(args_count, msg)))
 	{
-		printf("Message 'setpromisc' was sent");
+		printf("Message 'setpromisc' was sent\n");
 	}
 	else
 	{
-		printf("Error of sending message 'setpromisc'");
+		printf("Error of sending message 'setpromisc'\n");
 	}
 	if (!(res = MsgCmd(args_count, msg2)))
 	{
-		printf("Message 'setautosrc' was sent");
+		printf("Message 'setautosrc' was sent\n");
 	}
 	else
 	{
-		printf("Error of sending message 'setautosrc'");
+		printf("Error of sending message 'setautosrc'\n");
 	}
 }
 

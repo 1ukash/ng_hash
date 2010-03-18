@@ -43,7 +43,7 @@
 
 #include "ngctl.h"
 
-static int ConnectCmd(int ac, char **av); 
+int ConnectCmd(int ac, char **av); 
 
 const struct ngcmd connect_cmd = {
 	ConnectCmd,
@@ -57,7 +57,7 @@ const struct ngcmd connect_cmd = {
 	{ "join" }
 };
 
-static int
+int
 ConnectCmd(int ac, char **av)
 {
 	struct ngm_connect con;
