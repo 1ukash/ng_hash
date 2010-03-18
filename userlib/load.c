@@ -16,10 +16,15 @@
 #include <sysexits.h>
 #include <unistd.h>
 
+#define DUMP_BYTES_PER_LINE	16
+
+/* Управляющий сокет и сокет данных */
+int	csock, dsock;
 
 void arr_conn (char **args, char *name, char *ch);
 void interface (char **buf_con, char **msg, char **msg2, char *arg, char *ch);
- 
+
+
 int main (int argc, char **argv)
 {
 	char name[NG_NODESIZ];
@@ -41,8 +46,7 @@ int main (int argc, char **argv)
 	char *args_msg[] = {"msg", buf_msg, "setpromisc", "1"};
 	char *args_msg2[] = {"msg", buf_msg, "setautosrc", "0"};
 	
-	/* Управляющий сокет и сокет данных */
-	int	csock, dsock;
+	
 	
 	/* Задание имени узла по умолчанию */
 	snprintf(name, sizeof(name), "ngctl%d", getpid());
@@ -163,5 +167,39 @@ void interface (char **buf_con, char **msg, char **msg2, char *arg, char *ch)
 	else
 	{
 		printf("Error of sending message 'setautosrc'");
+	}
+}
+
+void
+DumpAscii(const u_char *buf, int len)
+{
+	char ch, sbuf[100];
+	int k, count;
+
+	for (count = 0; count < len; count += DUMP_BYTES_PER_LINE) {
+		snprintf(sbuf, sizeof(sbuf), "%04x:  ", count);
+		for (k = 0; k < DUMP_BYTES_PER_LINE; k++) {
+			if (count + k < len) {
+				snprintf(sbuf + strlen(sbuf),
+				    sizeof(sbuf) - strlen(sbuf),
+				    "%02x ", buf[count + k]);
+			} else {
+				snprintf(sbuf + strlen(sbuf),
+				    sizeof(sbuf) - strlen(sbuf), "   ");
+			}
+		}
+		snprintf(sbuf + strlen(sbuf), sizeof(sbuf) - strlen(sbuf), " ");
+		for (k = 0; k < DUMP_BYTES_PER_LINE; k++) {
+			if (count + k < len) {
+				ch = isprint(buf[count + k]) ?
+				    buf[count + k] : '.';
+				snprintf(sbuf + strlen(sbuf),
+				    sizeof(sbuf) - strlen(sbuf), "%c", ch);
+			} else {
+				snprintf(sbuf + strlen(sbuf),
+				    sizeof(sbuf) - strlen(sbuf), " ");
+			}
+		}
+		printf("%s\n", sbuf);
 	}
 }
