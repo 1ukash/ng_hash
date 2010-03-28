@@ -21,8 +21,7 @@
 /* Управляющий сокет и сокет данных */
 int	csock, dsock;
 
-void arr_conn (char **args, char *name, char *ch);
-void interface (char **buf_con, char **msg, char **msg2, char *arg, char *ch);
+void interface (char **buf_con, char **msg, char **msg2, char *arg);
 
 
 int main (int argc, char **argv)
@@ -111,26 +110,21 @@ int main (int argc, char **argv)
 	
 	if (argc > 2)
 	{
-		char *args_conn[5];
-		char hook[1] = "B";
-		for (int i=2;i<argc; i++)
+		char buf_connect[10];
+		strcpy (buf_connect, argv[2]);
+		strcat (buf_connect, ":");
+		char *hook = {"B", "C", "D"};
+		char *args_conn[] = {"connect", "HASH:", buf_connect, hook[0], "lower"};
+		interface (args_conn, args_msg, args_msg2, argv[2]);
+		for (int i=3;i<argc; i++)
 		{
-			interface (args_conn, args_msg, args_msg2, argv[i], hook);
-			hook[0]++;
+			strcpy (buf_connect, argv[i]);
+			strcat (buf_connect, ":");
+			args_conn[2] = buf_connect;
+			args_conn[3] = hook[i-2];
+			interface (args_conn, args_msg, args_msg2, argv[i]);
 		}
 	}
-}
-
-void arr_conn (char **args, char *name, char *ch)
-{
-	char buf_connect[10];
-	strcpy (buf_connect,name);
-	strcat (buf_connect,":");
-	strcpy (args[0],"connect");
-	strcpy (args[1],"HASH:");
-	strcpy (args[2],buf_connect);
-	strcpy (args[3],ch);
-	strcpy (args[4],"lower");
 }
 
 void interface (char **buf_con, char **msg, char **msg2, char *arg, char *ch)
