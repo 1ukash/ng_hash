@@ -2,7 +2,7 @@
 KMOD    =  ng_hash
 
 # Исходные и заголовочные файлы модуля
-SRCS    =  ng_hash.h ng_hash.c hash.c hash.h hash_tcp.h hash_tcp.c
+SRCS    =  ng_hash.h ng_hash.c hash.c hash.h
 
 # Добавление сборочного файла модуля ядра
 .include <bsd.kmod.mk>

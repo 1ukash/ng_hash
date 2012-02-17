@@ -10,7 +10,7 @@
 * $Id$
 **********************************************************************
 */
-#include "hash.h"
+#include "hash_tcp.h"
 
 struct hookinfo {
 	hook_p			hook;
@@ -26,27 +26,6 @@ struct privdata {
 	int cnt;
 };
 typedef struct privdata *sc_p;
-
-struct queue_element {
-  struct mbuf *m;
-	hook_p hook;
-};
-
-struct frame{
-  struct queue_element *q_el;
-  struct frame *next;
-};
-
-static struct mtx mutex[8];
-static struct frame **first, **last;
-static struct proc **queue_proc;
-static int cpus = 4;
-static unsigned int hashMask = 255;
-
-void put(struct queue_element *q_el, int num);
-struct queue_element* get(int num);
-int isEmpty(int num);
-static int ng_hash_rcvdata(hook_p hook, struct mbuf *m);
 
 static ng_constructor_t	ng_hash_constructor;
 static ng_rcvmsg_t	ng_hash_rcvmsg;
@@ -119,122 +98,77 @@ static struct ng_type ng_hash_typestruct = {
 };
 NETGRAPH_INIT(hash, &ng_hash_typestruct);
 
-void put(struct queue_element *q_el, int num){
+static struct mtx mutex;
+
+struct hook_item {
+  hook_p hook;
+  item_p item;
+};
+
+struct frame{
+  struct hook_item *hit;
+  struct frame *next;
+};
+
+
+static struct frame *first, *last;
+static struct proc *queue_proc;
+static int atime = 0, count = 0;
+
+void put(struct hook_item *hkit){
   struct frame *tmp = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
   tmp->next = NULL;
-  tmp->q_el = q_el;
-  if (first[num]->next == NULL) {
-    first[num]->next = tmp;
+  tmp->hit = hkit;
+  if (first->next == NULL) {
+    first->next = tmp;
   }
-  last[num]->next = tmp;
-  last[num] = tmp;
+  last->next = tmp;
+  last = tmp;
 };
 
-struct queue_element* get(int num){
-  struct frame *tmp = first[num]->next;
-  struct queue_element *q_el = tmp->q_el;
-  first[num]->next = tmp->next;
-  if (first[num]->next == NULL) {
-    last[num] = first[num];
+struct hook_item* get(){
+  struct frame *tmp = first->next;
+  struct hook_item *hkit = tmp->hit;
+  first->next = tmp->next;
+  if (first->next == NULL) {
+    last = first;
   }
   free(tmp, M_NETGRAPH);
-  return q_el;
+  return hkit;
 };
 
-int isEmpty(int num) {
-  return first[num]->next == NULL;
+int isEmpty() {
+  return first->next == NULL;
 }
 
-static void processing(void *arg) {
-  int n = (int) arg;
-  while (1) {
-  mtx_lock(&mutex[n]);
-    if (isEmpty(n)) {
-			mtx_unlock(&mutex[n]);
-			tsleep(queue_proc[n], 0, "sleeping", 0);
-    } else {
-			struct queue_element *data = get(n);
- 			mtx_unlock(&mutex[n]);			
-			ng_hash_rcvdata(data->hook, data->m);
+static void test_func() {
+    while (1) {
+    mtx_lock(&mutex);
+    if (isEmpty()) {
+//      printf("Empty\n");
+	mtx_unlock(&mutex);
+	tsleep(queue_proc, 0, "sleeping", 0);
+      } else {
+	struct hook_item *data = get();
+	mtx_unlock(&mutex);
+	ng_hash_rcvdata(data->hook, data->item);
+      }
     }
-  }
 }
 
 static int ng_hash_queue_rcvdata(hook_p hook, item_p item) {
 
-  struct queue_element *data = (struct queue_element*)malloc(sizeof(struct queue_element), M_NETGRAPH, M_NOWAIT|M_ZERO);
-	
-  struct ether_header *eh;
-	struct mbuf *m;
-	struct ip *ip;
-	struct tcphdr *tcp;
-	struct udphdr *udp;
-	int ip_off, poff;
-	
-	NGI_GET_M(item, m);
-	NG_FREE_ITEM(item);
-		
-  if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-    NG_FREE_M(m);
-    printf("invalid packet length\n");
-    return (EINVAL);
-  }
   
-  if ((m->m_len < ETHER_HDR_LEN) && !(m=m_pullup(m,ETHER_HDR_LEN))) {
-    printf("cannot pullup()\n");
-    return (ENOBUFS);
-  }
-	
-	eh = mtod(m, struct ether_header *);
-	
-	u_int32_t hash = 0;
-	int queue_num;
-	
-	if (eh->ether_type == htons(ETHERTYPE_IP)) {
-		ip_off = sizeof(struct ether_header);
-		if ((m = m_pullup(m, ip_off + sizeof(struct ip)))==NULL) {
-			printf("cannot pullup()\n");
-			return(ENOBUFS);
-		}
-		ip = (struct ip *)(mtod(m, char *) + ip_off);		
-		//проверяем протокол
-		if (ip->ip_p == 6){ //TCP
-			poff = ip_off + (ip->ip_hl << 2);
-			if ((m = m_pullup(m, poff + sizeof(struct tcphdr)))==NULL) {
-				printf("cannot pullup()\n");
-				return(ENOBUFS);
-			}
-			tcp = (struct tcphdr *)(mtod(m, char *) + poff);
-			hash = VC_HASH(ip->ip_src.s_addr,tcp->th_sport,ip->ip_dst.s_addr,tcp->th_dport,hashMask);
-			
-			queue_num = hash % cpus;
-		
-		} else if (ip->ip_p == 17) { //UDP
-				poff = ip_off + (ip->ip_hl << 2);
-				if ((m = m_pullup(m, poff + sizeof(struct udphdr)))==NULL) {
-				printf("cannot pullup()\n");
-				return(ENOBUFS);
-			}
-			udp = (struct udphdr *)(mtod(m, char *) + poff);
-			hash = VC_HASH(ip->ip_src.s_addr,udp->uh_sport,ip->ip_dst.s_addr,udp->uh_dport,hashMask);
-			
-			queue_num = hash % cpus;
-			
-		} else {
-			queue_num = 0;
-			printf("Not TCP/UDP protocol:%d\n", ip->ip_p);
-		}
-	} else { //не IP протокол
-			queue_num = 0;
-	}
-  	
+  struct hook_item *data = (struct hook_item*)malloc(sizeof(struct hook_item), M_NETGRAPH, M_NOWAIT|M_ZERO);
+  
   data->hook = hook;
-  data->m = m;
-	
-	mtx_lock(&mutex[queue_num]);
-	put(data, queue_num);
-	mtx_unlock(&mutex[queue_num]);
-	wakeup(queue_proc[queue_num]);
+  data->item = item;
+  
+  mtx_lock(&mutex);
+  put(data);
+  mtx_unlock(&mutex);
+  wakeup(queue_proc);
+
 	
   return 0;
   
@@ -260,7 +194,7 @@ ng_hash_constructor(node_p node)
 	if(error != 0) {
 		return (ENOMEM);
 	}
-	
+
 	int i = 0;
 	for(;i<IFNUM;i++) {
 		privdata->links[i] = NULL;
@@ -271,33 +205,20 @@ ng_hash_constructor(node_p node)
 
 	NG_NODE_SET_PRIVATE(node, privdata);
 	
-	if ((N_MALLOC(queue_proc, struct proc** , cpus * sizeof(struct proc *)) ) == NULL) {
-		return -1;
-	}
+	/*создание пустой очереди*/
+	first = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
+	first->next = NULL;
+	first->hit = NULL;
+	last = first;
 	
-	if ((N_MALLOC(first, struct frame** , cpus * sizeof(struct frame *)) ) == NULL) {
-		return -1;
-	}
-
-	if ((N_MALLOC(last, struct frame** , cpus * sizeof(struct frame *)) ) == NULL) {
-		return -1;
-	}
+	queue_proc = (struct proc*)malloc(sizeof(struct proc), M_NETGRAPH, M_NOWAIT|M_ZERO);
 	
-	printf("threads = %d\n", cpus);
-	for(i = 0; i < cpus; i++) {
-	  
-	  mtx_init(&mutex[i], "mutex", NULL, MTX_DEF);
-	  queue_proc[i] = (struct proc*)malloc(sizeof(struct proc), M_NETGRAPH, M_NOWAIT|M_ZERO);
-	  /*создание пустой очереди*/
-	  first[i] = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
-	  first[i]->next = NULL;
-	  first[i]->q_el = NULL;
-	  last[i] = first[i];
-	
-	  if (kthread_create(processing, (void *)i, NULL, 0, 0, "queue%d", i))
-		break;
+	mtx_init(&mutex, "mutex", NULL, MTX_DEF);
+	printf("threads = %d\n", mp_ncpus);
+	for(i = 0; i < mp_ncpus; i++) {
+		if (kthread_create(test_func, NULL, NULL, 0, 0, "queue%d", i))
+			break;
  	}	
- 	
 	return (0);
 }
 
@@ -429,37 +350,80 @@ done:
 }
 
 int
-ng_hash_rcvdata(hook_p hook, struct mbuf *m) 
+ng_hash_rcvdata(hook_p hook, item_p item)
 {
-  
+
+  /*	unsigned int fact1 = 1,fact2 = 1;
+	int rand = 500 + (int) &fact1 % 500; 
+	for (int i = 1; i <= 30; i++) {
+	  fact1 *= (unsigned int) i;
+	  int rand1 = 540 + (int) &fact2 % 540; 
+	  for(int j = 1; j <= 100; j++)
+   	    fact2 *= (unsigned int) j;
+	}
+*/
+
+	/*int r,t;
+	struct timeval s;
+	for (t=0; t < 1000; t++) {
+	  microtime(&s);
+	  r = (int)s.tv_usec;
+	}*/
+	
+	//struct timeval s1, s2, s3;
+	//microtime(&s1);
+
 	const node_p node = NG_HOOK_NODE(hook);
 	const sc_p priv = NG_NODE_PRIVATE(node);
 	const hi_p hinfo = NG_HOOK_PRIVATE(hook);
 
 	struct ether_header *eh;
 	int	error = 0;
-	
-	//struct mbuf *m;
-	//NGI_GET_M(item, m);
-	//NG_FREE_ITEM(item);
-	
-// 	if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-// 		NG_FREE_M(m);
-// 		printf("invalid packet length\n");
-// 		return (EINVAL);
-// 	}
-// 	if ((m->m_len < ETHER_HDR_LEN) && !(m=m_pullup(m,ETHER_HDR_LEN))) {
-// 		printf("cannot pullup()\n");
-// 		return (ENOBUFS);
-// 	}
-	
-	eh = mtod(m, struct ether_header *);
+	struct mbuf *m;
+	struct ip *ip;
+        struct tcphdr *tcp;
+        int ip_off, poff, pktlen;
+	NGI_GET_M(item, m);
+	NG_FREE_ITEM(item);
 
-	if ((eh->ether_shost[0] & 1) != 0) {
+	pktlen = m->m_pkthdr.len;
+	
+	if (m->m_pkthdr.len < ETHER_HDR_LEN) {
+		NG_FREE_M(m);
+		printf("invalid packet length\n");
+		return (EINVAL);
+	}
+	if ((m->m_len < ETHER_HDR_LEN) && !(m=m_pullup(m,ETHER_HDR_LEN))) {
+		printf("cannot pullup()\n");
+		return (ENOBUFS);
+	}
+	eh = mtod(m, struct ether_header *);
+	if (eh->ether_type == htons(ETHERTYPE_IP)) {
+		ip_off = sizeof(struct ether_header);
+		if ((m = m_pullup(m, ip_off + sizeof(struct ip)))==NULL) {
+			printf("cannot pullup()\n");
+			return(ENOBUFS);
+		}
+		ip = (struct ip *)(mtod(m, char *) + ip_off);
+        //	printf("ip_v = %d; ip_p = %d; ip_id = %d; csum = %d\n", ip->ip_v, ip->ip_p,ip->ip_id,ip->ip_sum);
+		if (ip->ip_p == 6){
+		poff = ip_off + (ip->ip_hl << 2);
+		
+		if ((m = m_pullup(m, poff + sizeof(struct tcphdr)))==NULL) {
+			printf("cannot pullup()\n");
+			return(ENOBUFS);
+		}
+		tcp = (struct tcphdr *)(mtod(m, char *) + poff);
+	//	printf("node = %s; curthread = %d; seq = %lu; ip_id = %d\n ", NG_HASH_NODE_TYPE, curthread->td_tid, tcp->th_seq, ip->ip_id);
+		}
+ 
+	}
+
+	/*if ((eh->ether_shost[0] & 1) != 0) {
 		NG_FREE_M(m);
 		printf("invalid packet\n");
 		return (EINVAL);
-	}
+	}*/
 	
 	int manycast;
 	manycast = eh->ether_dhost[0] & 1;
@@ -489,6 +453,16 @@ ng_hash_rcvdata(hook_p hook, struct mbuf *m)
 			dest->stats.inFrames++;
 			NG_SEND_DATA_ONLY(error, dest->hook, m);
 
+			/*microtime(&s2);
+			timersub(&s2,&s1,&s3);
+			int ms = s3.tv_usec;
+			priv->atime += ms;
+			if( ++(priv->cnt) == 1000) {
+			  printf("postrocessing %d\t%d\n", priv->atime / priv->cnt, priv->cnt);
+			  priv->cnt = 0;
+			  priv->atime = 0;
+			}*/
+			
 			return (error);
 		}
 	} else { //Manycast, update stats
@@ -516,7 +490,7 @@ ng_hash_rcvdata(hook_p hook, struct mbuf *m)
 			m2 = m_dup(m, M_DONTWAIT);
 			
 			if(m2 == NULL) { //Если mbuf не скопировался
-				//NG_FREE_ITEM(item);
+				NG_FREE_ITEM(item);
 				NG_FREE_M(m);
 				return (ENOBUFS);
 			}
@@ -534,6 +508,16 @@ ng_hash_rcvdata(hook_p hook, struct mbuf *m)
 	} else { //А если никого не нашли, то отпустим mbuf с богом
 		NG_FREE_M(m);
 	}
+
+	/*microtime(&s2);
+	timersub(&s2,&s1,&s3);
+        int ms = s3.tv_usec;
+        priv->atime += ms;
+        if( ++(priv->cnt) == 1000) {
+	  printf("postrocessing %d\t%d\n", priv->atime / priv->cnt, priv->cnt);
+          priv->cnt = 0;
+          priv->atime = 0;
+        }*/
 
 	return (error);
 }

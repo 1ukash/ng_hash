@@ -1,9 +1,12 @@
 #ifndef _HASH_TCP_H_
 #define _HASH_TCP_H_
 
-#ifdef _KERNEL
-    #include "hash.h"
-#endif
+#include <sys/types.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+
+#include "hash.h"
 
 #define HASH_TCP_SIZE_INCREASE 1
 #define HASH_TCP_SIZE_DECREASE 0
@@ -14,10 +17,10 @@
 /*
  * Вычисление хеша. 
  */
-#define TCP_HASH(saddr,sport,daddr,dport,mask)		( (((const u_int32_t )(saddr)) \
-							^((const u_int32_t )(sport)) \
-							^((const u_int32_t )(daddr)) \
-							^((const u_int32_t )(dport)))&(mask) )
+#define TCP_HASH(saddr,sport,daddr,dport,mask)		( (((const u_int32_t *)(saddr)) 	\
+				 ^ ((const u_int32_t *)(sport)) 	\
+				 ^ ((const u_int32_t *)(daddr))		\
+				 ^ ((const u_int32_t *)(dport))) & (mask) )
 
 // определения структур данных
 
@@ -38,7 +41,7 @@ struct tcp_hash_el {
 *загрузки
 */
 struct tcp_hash_table {
-    struct tcp_hash_el **elements; //элементы таблицы
+    struct tcp_hash_el *elements; //элементы таблицы
     size_t hash_size;	//текущий размер
     unsigned int hashMask; //маска для хеширования
     int num_elements; //счетчик количества элементов

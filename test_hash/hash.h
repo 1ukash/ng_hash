@@ -74,6 +74,10 @@
 				 ^ ((const u_int16_t *)(addr))[1] 	\
 				 ^ ((const u_int16_t *)(addr))[2]) & (mask) )
 
+#define VC_HASH(saddr,sport,daddr,dport,mask)		( (((const u_int32_t)(saddr)) 	\
+				 ^ ((const u_int32_t)(sport)) 	\
+				 ^ ((const u_int32_t)(daddr))		\
+				 ^ ((const u_int32_t)(dport))) & (mask) )
 // определения структур данных
 
 /*

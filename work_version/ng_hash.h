@@ -34,6 +34,7 @@
 #include <netinet/in.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include <netinet/ip.h>
 #include <netinet/tcpip.h>
 #include <netgraph/ng_message.h>

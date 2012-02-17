@@ -10,7 +10,7 @@
 * $Id$
 **********************************************************************
 */
-#include "hash.h"
+#include "hash_tcp.h"
 
 struct hookinfo {
 	hook_p			hook;
@@ -26,27 +26,6 @@ struct privdata {
 	int cnt;
 };
 typedef struct privdata *sc_p;
-
-struct queue_element {
-  struct mbuf *m;
-	hook_p hook;
-};
-
-struct frame{
-  struct queue_element *q_el;
-  struct frame *next;
-};
-
-static struct mtx mutex[8];
-static struct frame **first, **last;
-static struct proc **queue_proc;
-static int cpus = 4;
-static unsigned int hashMask = 255;
-
-void put(struct queue_element *q_el, int num);
-struct queue_element* get(int num);
-int isEmpty(int num);
-static int ng_hash_rcvdata(hook_p hook, struct mbuf *m);
 
 static ng_constructor_t	ng_hash_constructor;
 static ng_rcvmsg_t	ng_hash_rcvmsg;
@@ -119,6 +98,25 @@ static struct ng_type ng_hash_typestruct = {
 };
 NETGRAPH_INIT(hash, &ng_hash_typestruct);
 
+static struct mtx mutex[8], send_mtx;
+
+struct queue_element {
+  struct mbuf *m;
+	hook_p hook;
+	//item_p item;
+};
+
+struct frame{
+  struct queue_element *q_el;
+  struct frame *next;
+};
+
+
+static struct frame **first, **last;
+static struct proc **queue_proc;
+static int atime = 0, count = 0, cpus = 4;
+static struct tcp_hash_table *tcpht;
+
 void put(struct queue_element *q_el, int num){
   struct frame *tmp = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
   tmp->next = NULL;
@@ -145,7 +143,7 @@ int isEmpty(int num) {
   return first[num]->next == NULL;
 }
 
-static void processing(void *arg) {
+static void test_func(void *arg) {
   int n = (int) arg;
   while (1) {
   mtx_lock(&mutex[n]);
@@ -165,12 +163,11 @@ static int ng_hash_queue_rcvdata(hook_p hook, item_p item) {
   struct queue_element *data = (struct queue_element*)malloc(sizeof(struct queue_element), M_NETGRAPH, M_NOWAIT|M_ZERO);
 	
   struct ether_header *eh;
+	int error = 0;
 	struct mbuf *m;
 	struct ip *ip;
 	struct tcphdr *tcp;
-	struct udphdr *udp;
 	int ip_off, poff;
-	
 	NGI_GET_M(item, m);
 	NG_FREE_ITEM(item);
 		
@@ -197,35 +194,23 @@ static int ng_hash_queue_rcvdata(hook_p hook, item_p item) {
 			return(ENOBUFS);
 		}
 		ip = (struct ip *)(mtod(m, char *) + ip_off);		
-		//проверяем протокол
-		if (ip->ip_p == 6){ //TCP
+		//проверяем TCP ли это
+		if (ip->ip_p == 6){
 			poff = ip_off + (ip->ip_hl << 2);
 			if ((m = m_pullup(m, poff + sizeof(struct tcphdr)))==NULL) {
 				printf("cannot pullup()\n");
 				return(ENOBUFS);
 			}
 			tcp = (struct tcphdr *)(mtod(m, char *) + poff);
-			hash = VC_HASH(ip->ip_src.s_addr,tcp->th_sport,ip->ip_dst.s_addr,tcp->th_dport,hashMask);
+			hash = TCP_HASH(ip->ip_src.s_addr,tcp->th_sport,ip->ip_dst.s_addr,tcp->th_dport,tcpht->hashMask);
 			
 			queue_num = hash % cpus;
 		
-		} else if (ip->ip_p == 17) { //UDP
-				poff = ip_off + (ip->ip_hl << 2);
-				if ((m = m_pullup(m, poff + sizeof(struct udphdr)))==NULL) {
-				printf("cannot pullup()\n");
-				return(ENOBUFS);
-			}
-			udp = (struct udphdr *)(mtod(m, char *) + poff);
-			hash = VC_HASH(ip->ip_src.s_addr,udp->uh_sport,ip->ip_dst.s_addr,udp->uh_dport,hashMask);
-			
-			queue_num = hash % cpus;
-			
 		} else {
-			queue_num = 0;
-			printf("Not TCP/UDP protocol:%d\n", ip->ip_p);
+				queue_num = 1;
 		}
-	} else { //не IP протокол
-			queue_num = 0;
+	} else {
+			queue_num = 2;
 	}
   	
   data->hook = hook;
@@ -255,12 +240,22 @@ ng_hash_constructor(node_p node)
 	if (privdata->mactable == NULL)
 		return (ENOMEM);
 	
+	MALLOC(tcpht, struct tcp_hash_table*, sizeof(struct tcp_hash_table), M_NETGRAPH, M_NOWAIT|M_ZERO);
+	
+	if (tcpht == NULL)
+		return (ENOMEM);
+	
 	int error;
 	error=init_default(privdata->mactable);
 	if(error != 0) {
 		return (ENOMEM);
 	}
 	
+	error=init_default_tcp_hash_table(tcpht);
+	if(error != 0) {
+		return (ENOMEM);
+	}
+
 	int i = 0;
 	for(;i<IFNUM;i++) {
 		privdata->links[i] = NULL;
@@ -284,6 +279,7 @@ ng_hash_constructor(node_p node)
 	}
 	
 	printf("threads = %d\n", cpus);
+	mtx_init(&send_mtx, "mutex", NULL, MTX_DEF);
 	for(i = 0; i < cpus; i++) {
 	  
 	  mtx_init(&mutex[i], "mutex", NULL, MTX_DEF);
@@ -294,7 +290,7 @@ ng_hash_constructor(node_p node)
 	  first[i]->q_el = NULL;
 	  last[i] = first[i];
 	
-	  if (kthread_create(processing, (void *)i, NULL, 0, 0, "queue%d", i))
+	  if (kthread_create(test_func, (void *)i, NULL, 0, 0, "queue%d", i))
 		break;
  	}	
  	

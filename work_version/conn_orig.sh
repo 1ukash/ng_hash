@@ -1,7 +1,7 @@
 #!/bin/sh
 
-#kldload ng_ether
-#kldload ./ng_hash.ko
+kldload ng_ether
+kldload ./ng_hash.ko
 
  if [ -z "$1" ]; then
         echo "HASH no interface name specified."

@@ -10,7 +10,7 @@
 * $Id$
 **********************************************************************
 */
-#include "hash.h"
+#include "hash_tcp.h"
 
 struct hookinfo {
 	hook_p			hook;
@@ -98,7 +98,7 @@ static struct ng_type ng_hash_typestruct = {
 };
 NETGRAPH_INIT(hash, &ng_hash_typestruct);
 
-static struct mtx mutex;
+static struct mtx mutex[8];
 
 struct hook_item {
   hook_p hook;
@@ -111,61 +111,68 @@ struct frame{
 };
 
 
-static struct frame *first, *last;
-static struct proc *queue_proc;
+static struct frame **first, **last;
+static struct proc **queue_proc;
+static int atime = 0, count = 0, queue_num = 0;
 
-void put(struct hook_item *hkit){
+void put(struct hook_item *hkit, int num){
   struct frame *tmp = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
   tmp->next = NULL;
   tmp->hit = hkit;
-  if (first->next == NULL) {
-    first->next = tmp;
+  if (first[num]->next == NULL) {
+    first[num]->next = tmp;
   }
-  last->next = tmp;
-  last = tmp;
+  last[num]->next = tmp;
+  last[num] = tmp;
 };
 
-struct hook_item* get(){
-  struct frame *tmp = first->next;
+struct hook_item* get(int num){
+  struct frame *tmp = first[num]->next;
   struct hook_item *hkit = tmp->hit;
-  first->next = tmp->next;
-  if (first->next == NULL) {
-    last = first;
+  first[num]->next = tmp->next;
+  if (first[num]->next == NULL) {
+    last[num] = first[num];
   }
   free(tmp, M_NETGRAPH);
   return hkit;
 };
 
-int isEmpty() {
-  return first->next == NULL;
+int isEmpty(int num) {
+  return first[num]->next == NULL;
 }
 
-static void test_func() {
+static void test_func(void *arg) {
+    int n = 0;//(int) arg;
     while (1) {
-    mtx_lock(&mutex);
-    if (isEmpty()) {
-//      printf("Empty\n");
-	mtx_unlock(&mutex);
-	tsleep(queue_proc, 0, "sleeping", 0);
-      } else {
-	struct hook_item *data = get();
-	mtx_unlock(&mutex);
-	ng_hash_rcvdata(data->hook, data->item);
-      }
+    mtx_lock(&mutex[n]);
+    if (isEmpty(n)) {
+			mtx_unlock(&mutex[n]);
+			tsleep(queue_proc[n], 0, "sleeping", 0);
+    } else {
+			struct hook_item *data = get(n);
+			mtx_unlock(&mutex[n]);
+			ng_hash_rcvdata(data->hook, data->item);
     }
+		}
 }
 
 static int ng_hash_queue_rcvdata(hook_p hook, item_p item) {
+
   
   struct hook_item *data = (struct hook_item*)malloc(sizeof(struct hook_item), M_NETGRAPH, M_NOWAIT|M_ZERO);
   
   data->hook = hook;
   data->item = item;
   
-  mtx_lock(&mutex);
-  put(data);
-  mtx_unlock(&mutex);
-  wakeup(queue_proc);
+  mtx_lock(&mutex[queue_num]);
+  put(data, queue_num);
+  mtx_unlock(&mutex[queue_num]);
+  wakeup(queue_proc[queue_num]);
+  
+//   queue_num++;
+//   if (queue_num == mp_ncpus)
+//     queue_num = 0;
+  
   return 0;
   
 }
@@ -201,19 +208,31 @@ ng_hash_constructor(node_p node)
 
 	NG_NODE_SET_PRIVATE(node, privdata);
 	
-	/*создание пустой очереди*/
-	first = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
-	first->next = NULL;
-	first->hit = NULL;
-	last = first;
+	if ((N_MALLOC(queue_proc, struct proc** , mp_ncpus * sizeof(struct proc *)) ) == NULL) {
+		return -1;
+	}
 	
-	queue_proc = (struct proc*)malloc(sizeof(struct proc), M_NETGRAPH, M_NOWAIT|M_ZERO);
+	if ((N_MALLOC(first, struct frame** , mp_ncpus * sizeof(struct frame *)) ) == NULL) {
+		return -1;
+	}
+
+	if ((N_MALLOC(last, struct frame** , mp_ncpus * sizeof(struct frame *)) ) == NULL) {
+		return -1;
+	}
 	
-	mtx_init(&mutex, "mutex", NULL, MTX_DEF);
 	printf("threads = %d\n", mp_ncpus);
 	for(i = 0; i < mp_ncpus; i++) {
-		if (kthread_create(test_func, NULL, NULL, 0, 0, "queue%d", i))
-			break;
+	  
+	  mtx_init(&mutex[i], "mutex", NULL, MTX_DEF);
+	  queue_proc[i] = (struct proc*)malloc(sizeof(struct proc), M_NETGRAPH, M_NOWAIT|M_ZERO);
+	  /*создание пустой очереди*/
+	  first[i] = (struct frame*)malloc(sizeof(struct frame), M_NETGRAPH, M_NOWAIT|M_ZERO);
+	  first[i]->next = NULL;
+	  first[i]->hit = NULL;
+	  last[i] = first[i];
+	
+	  if (kthread_create(test_func, (void *)i, NULL, 0, 0, "queue%d", i))
+		break;
  	}	
 	return (0);
 }
@@ -359,12 +378,14 @@ ng_hash_rcvdata(hook_p hook, item_p item)
 	}
 */
 
-	int r,t;
+	/*int r,t;
 	struct timeval s;
 	for (t=0; t < 1000; t++) {
 	  microtime(&s);
 	  r = (int)s.tv_usec;
-	}
+	}*/
+	
+	
 
 	const node_p node = NG_HOOK_NODE(hook);
 	const sc_p priv = NG_NODE_PRIVATE(node);
@@ -412,11 +433,11 @@ ng_hash_rcvdata(hook_p hook, item_p item)
  
 	}
 
-	if ((eh->ether_shost[0] & 1) != 0) {
+	/*if ((eh->ether_shost[0] & 1) != 0) {
 		NG_FREE_M(m);
 		printf("invalid packet\n");
 		return (EINVAL);
-	}
+	}*/
 	
 	int manycast;
 	manycast = eh->ether_dhost[0] & 1;
@@ -445,7 +466,7 @@ ng_hash_rcvdata(hook_p hook, item_p item)
 			struct hookinfo *dest = priv->links[link];
 			dest->stats.inFrames++;
 			NG_SEND_DATA_ONLY(error, dest->hook, m);
-
+			
 			return (error);
 		}
 	} else { //Manycast, update stats
